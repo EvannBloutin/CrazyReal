@@ -85,6 +85,12 @@ INSERT INTO user (username, email, password, first_name, last_name) VALUES
 ('admin', 'admin@crazyreal.com', '$2b$10$example_hashed_password', 'Admin', 'User'),
 ('testuser', 'test@example.com', '$2b$10$example_hashed_password', 'Test', 'User');
 
-INSERT INTO mission (title, description, creator_id, location, reward_points, difficulty_level) VALUES
-('Mission Test', 'Une mission de test pour vérifier le fonctionnement', 1, 'Paris, France', 100, 'easy'),
-('Photo Challenge', 'Prendre une photo d\'un monument historique', 1, 'Lyon, France', 200, 'medium');
+INSERT INTO mission (title, description, creator_id, location, reward_points, difficulty_level, is_completed) VALUES
+('Mission Test', 'Une mission de test pour vérifier le fonctionnement', 1, 'Paris, France', 100, 'easy', FALSE),
+('Photo Challenge', 'Prendre une photo d\'un monument historique', 1, 'Lyon, France', 200, 'medium', FALSE),
+('Nature Walk', 'Photographier un paysage naturel dans votre région', 1, 'Partout en France', 150, 'easy', FALSE),
+('Street Art Hunt', 'Trouvez et photographiez une œuvre de street art', 1, 'Centre-ville', 180, 'medium', FALSE),
+('Sunset Challenge', 'Capturez un magnifique coucher de soleil', 1, 'Horizon dégagé', 220, 'hard', FALSE);
+
+-- Message de fin
+SELECT 'Base de données CrazyReal créée avec succès !' as message;
