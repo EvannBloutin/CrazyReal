@@ -1,0 +1,44 @@
+# Multi-stage Dockerfile pour CrazyReal
+FROM node:18-slim AS frontend-build
+
+# Build du frontend
+WORKDIR /app/frontend
+COPY front-web/package*.json ./
+RUN npm install
+
+COPY front-web/ ./
+RUN npm run build
+
+# Stage final avec le backend
+FROM node:18-slim
+
+# Installation des dépendances système
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Création du répertoire de travail
+WORKDIR /app
+
+# Copie des fichiers du backend
+COPY back-end/package*.json ./
+RUN npm install --only=production
+
+# Copie du code du backend
+COPY back-end/ ./
+
+# Copie du build du frontend dans le répertoire public du backend
+COPY --from=frontend-build /app/frontend/dist ./public
+
+# Création du répertoire uploads et permissions
+RUN mkdir -p uploads && chmod 755 uploads
+
+# Exposition du port
+EXPOSE $PORT
+
+# Variables d'environnement par défaut
+ENV NODE_ENV=production
+ENV PORT=3000
+
+# Commande de démarrage avec initialisation
+CMD ["node", "init.js"]
