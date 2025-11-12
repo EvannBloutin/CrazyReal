@@ -1,5 +1,5 @@
 const express = require('express');
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -16,19 +16,19 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Configuration de la base de données
-const dbConfig = {
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'crazyreal',
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-};
-
-// Pool de connexions MySQL
-const pool = mysql.createPool(dbConfig);
+// Configuration de la base de données PostgreSQL
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL || undefined,
+    host: process.env.DATABASE_URL ? undefined : (process.env.DB_HOST || 'localhost'),
+    user: process.env.DATABASE_URL ? undefined : (process.env.DB_USER || 'evann'),
+    password: process.env.DATABASE_URL ? undefined : (process.env.DB_PASSWORD || null),
+    database: process.env.DATABASE_URL ? undefined : (process.env.DB_NAME || 'crazyreal'),
+    port: process.env.DATABASE_URL ? undefined : (process.env.DB_PORT || 5432),
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
+});
 
 // Configuration de multer pour l'upload de fichiers
 const storage = multer.diskStorage({
@@ -83,22 +83,22 @@ const resetDailyMissions = async () => {
         const today = new Date().toISOString().split('T')[0]; // Format YYYY-MM-DD
         
         // Vérifier s'il y a des missions complétées hier qui doivent être reset
-        const [completedMissions] = await pool.execute(`
-            SELECT * FROM mission 
+        const completedResult = await pool.query(`
+            SELECT * FROM missions 
             WHERE is_completed = TRUE 
-            AND (completed_date IS NULL OR completed_date < ?)
+            AND (completed_date IS NULL OR completed_date < $1)
         `, [today]);
         
-        if (completedMissions.length > 0) {
+        if (completedResult.rows.length > 0) {
             // Reset toutes les missions qui ont été complétées avant aujourd'hui
-            await pool.execute(`
-                UPDATE mission 
+            await pool.query(`
+                UPDATE missions 
                 SET is_completed = FALSE, completed_date = NULL 
                 WHERE is_completed = TRUE 
-                AND (completed_date IS NULL OR completed_date < ?)
+                AND (completed_date IS NULL OR completed_date < $1)
             `, [today]);
             
-            console.log(`🔄 Reset quotidien: ${completedMissions.length} missions remises à disposition`);
+            console.log(`🔄 Reset quotidien: ${completedResult.rows.length} missions remises à disposition`);
         }
     } catch (error) {
         console.error('Erreur lors du reset quotidien:', error);
@@ -109,10 +109,10 @@ const resetDailyMissions = async () => {
 const markMissionCompleted = async (missionId) => {
     try {
         const today = new Date().toISOString().split('T')[0]; // Format YYYY-MM-DD
-        await pool.execute(`
-            UPDATE mission 
-            SET is_completed = TRUE, completed_date = ? 
-            WHERE id = ?
+        await pool.query(`
+            UPDATE missions 
+            SET is_completed = TRUE, completed_date = $1 
+            WHERE id = $2
         `, [today, missionId]);
         
         console.log(`✅ Mission ${missionId} marquée comme complétée pour aujourd'hui`);
@@ -144,14 +144,14 @@ app.post('/api/auth/register', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         // Insertion en base de données
-        const [result] = await pool.execute(
-            'INSERT INTO user (username, email, password, first_name, last_name) VALUES (?, ?, ?, ?, ?)',
+        const result = await pool.query(
+            'INSERT INTO users (username, email, password, first_name, last_name) VALUES ($1, $2, $3, $4, $5) RETURNING id',
             [username, email, hashedPassword, first_name, last_name]
         );
 
         res.status(201).json({ 
             message: 'Utilisateur créé avec succès',
-            userId: result.insertId
+            userId: result.rows[0].id
         });
     } catch (error) {
         if (error.code === 'ER_DUP_ENTRY') {
@@ -168,16 +168,16 @@ app.post('/api/auth/login', async (req, res) => {
         const { email, password } = req.body;
 
         // Récupération de l'utilisateur
-        const [rows] = await pool.execute(
-            'SELECT * FROM user WHERE email = ? AND is_active = TRUE',
+        const result = await pool.query(
+            'SELECT * FROM users WHERE email = $1 AND is_active = TRUE',
             [email]
         );
 
-        if (rows.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
         }
 
-        const user = rows[0];
+        const user = result.rows[0];
 
         // Vérification du mot de passe
         const validPassword = await bcrypt.compare(password, user.password);
@@ -212,14 +212,14 @@ app.post('/api/auth/login', async (req, res) => {
 // Routes missions
 app.get('/api/missions', async (req, res) => {
     try {
-        const [rows] = await pool.execute(`
+        const result = await pool.query(`
             SELECT m.*, u.username as creator_username 
-            FROM mission m 
-            JOIN user u ON m.creator_id = u.id 
+            FROM missions m 
+            JOIN users u ON m.creator_id = u.id 
             WHERE m.status = 'active'
             ORDER BY m.created_at DESC
         `);
-        res.json(rows);
+        res.json(result.rows);
     } catch (error) {
         console.error('Erreur lors de la récupération des missions:', error);
         res.status(500).json({ error: 'Erreur serveur' });
@@ -233,20 +233,20 @@ app.get('/api/missions/today', async (req, res) => {
         await resetDailyMissions();
         
         // Récupérer la mission du jour (plus ancienne non complétée)
-        const [rows] = await pool.execute(`
+        const result = await pool.query(`
             SELECT m.*, u.username as creator_username 
-            FROM mission m 
-            JOIN user u ON m.creator_id = u.id 
+            FROM missions m 
+            JOIN users u ON m.creator_id = u.id 
             WHERE m.status = 'active' AND m.is_completed = FALSE
             ORDER BY m.created_at ASC
             LIMIT 1
         `);
         
-        if (rows.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Aucune mission disponible' });
         }
         
-        res.json(rows[0]);
+        res.json(result.rows[0]);
     } catch (error) {
         console.error('Erreur lors de la récupération de la mission du jour:', error);
         res.status(500).json({ error: 'Erreur serveur' });
@@ -256,12 +256,12 @@ app.get('/api/missions/today', async (req, res) => {
 // Vérifier si un utilisateur a déjà fait une mission
 app.get('/api/missions/:id/completed', authenticateToken, async (req, res) => {
     try {
-        const [rows] = await pool.execute(
-            'SELECT * FROM user_missions WHERE user_id = ? AND mission_id = ?',
+        const result = await pool.query(
+            'SELECT * FROM user_missions WHERE user_id = $1 AND mission_id = $2',
             [req.user.userId, req.params.id]
         );
         
-        res.json({ completed: rows.length > 0 });
+        res.json({ completed: result.rows.length > 0 });
     } catch (error) {
         console.error('Erreur lors de la vérification de la mission:', error);
         res.status(500).json({ error: 'Erreur serveur' });
@@ -272,14 +272,14 @@ app.post('/api/missions', authenticateToken, async (req, res) => {
     try {
         const { title, description, location, latitude, longitude, reward_points, difficulty_level, max_participants, start_date, end_date } = req.body;
         
-        const [result] = await pool.execute(
-            'INSERT INTO mission (title, description, creator_id, location, latitude, longitude, reward_points, difficulty_level, max_participants, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        const result = await pool.query(
+            'INSERT INTO missions (title, description, creator_id, location, latitude, longitude, reward_points, difficulty_level, max_participants, start_date, end_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id',
             [title, description, req.user.userId, location, latitude, longitude, reward_points, difficulty_level, max_participants, start_date, end_date]
         );
 
         res.status(201).json({
             message: 'Mission créée avec succès',
-            missionId: result.insertId
+            missionId: result.rows[0].id
         });
     } catch (error) {
         console.error('Erreur lors de la création de la mission:', error);
@@ -289,18 +289,18 @@ app.post('/api/missions', authenticateToken, async (req, res) => {
 
 app.get('/api/missions/:id', async (req, res) => {
     try {
-        const [rows] = await pool.execute(`
+        const result = await pool.query(`
             SELECT m.*, u.username as creator_username 
-            FROM mission m 
-            JOIN user u ON m.creator_id = u.id 
-            WHERE m.id = ?
+            FROM missions m 
+            JOIN users u ON m.creator_id = u.id 
+            WHERE m.id = $1
         `, [req.params.id]);
 
-        if (rows.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Mission non trouvée' });
         }
 
-        res.json(rows[0]);
+        res.json(result.rows[0]);
     } catch (error) {
         console.error('Erreur lors de la récupération de la mission:', error);
         res.status(500).json({ error: 'Erreur serveur' });
@@ -317,43 +317,47 @@ app.post('/api/pictures', authenticateToken, upload.single('image'), async (req,
         const { mission_id, description } = req.body;
         
         // Vérifier si l'utilisateur a déjà fait cette mission
-        const [existingRows] = await pool.execute(
-            'SELECT * FROM user_missions WHERE user_id = ? AND mission_id = ?',
+        const existingResult = await pool.query(
+            'SELECT * FROM user_missions WHERE user_id = $1 AND mission_id = $2',
             [req.user.userId, mission_id]
         );
         
-        if (existingRows.length > 0) {
+        if (existingResult.rows.length > 0) {
             return res.status(400).json({ error: 'Vous avez déjà complété cette mission' });
         }
         
         // Utiliser une transaction pour insérer l'image et marquer la mission comme faite
-        await pool.execute('START TRANSACTION');
+        const client = await pool.connect();
         
         try {
+            await client.query('BEGIN');
+            
             // Insérer l'image
-            const [result] = await pool.execute(
-                'INSERT INTO pictures (filename, original_name, file_path, file_size, mime_type, mission_id, user_id, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            const result = await client.query(
+                'INSERT INTO pictures (filename, original_name, file_path, file_size, mime_type, mission_id, user_id, description) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
                 [req.file.filename, req.file.originalname, req.file.path, req.file.size, req.file.mimetype, mission_id, req.user.userId, description]
             );
             
             // Marquer la mission comme complétée pour cet utilisateur
-            await pool.execute(
-                'INSERT INTO user_missions (user_id, mission_id) VALUES (?, ?)',
+            await client.query(
+                'INSERT INTO user_missions (user_id, mission_id) VALUES ($1, $2)',
                 [req.user.userId, mission_id]
             );
             
             // Marquer la mission globale comme complétée (plus disponible aujourd'hui)
             await markMissionCompleted(mission_id);
             
-            await pool.execute('COMMIT');
+            await client.query('COMMIT');
+            client.release();
             
             res.status(201).json({
                 message: 'Image uploadée avec succès et mission complétée !',
-                pictureId: result.insertId,
+                pictureId: result.rows[0].id,
                 filename: req.file.filename
             });
         } catch (error) {
-            await pool.execute('ROLLBACK');
+            await client.query('ROLLBACK');
+            client.release();
             throw error;
         }
         
@@ -365,15 +369,15 @@ app.post('/api/pictures', authenticateToken, upload.single('image'), async (req,
 
 app.get('/api/pictures/mission/:missionId', async (req, res) => {
     try {
-        const [rows] = await pool.execute(`
+        const result = await pool.query(`
             SELECT p.*, u.username 
             FROM pictures p 
-            JOIN user u ON p.user_id = u.id 
-            WHERE p.mission_id = ? AND p.is_public = TRUE
+            JOIN users u ON p.user_id = u.id 
+            WHERE p.mission_id = $1 AND p.is_public = TRUE
             ORDER BY p.upload_date DESC
         `, [req.params.missionId]);
 
-        res.json(rows);
+        res.json(result.rows);
     } catch (error) {
         console.error('Erreur lors de la récupération des images:', error);
         res.status(500).json({ error: 'Erreur serveur' });
@@ -387,29 +391,29 @@ app.get('/api/pictures/today', async (req, res) => {
         await resetDailyMissions();
         
         // Récupérer la mission du jour (plus ancienne non complétée)
-        const [missions] = await pool.execute(`
-            SELECT * FROM mission 
+        const missionsResult = await pool.query(`
+            SELECT * FROM missions 
             WHERE status = 'active' AND is_completed = FALSE 
             ORDER BY created_at ASC 
             LIMIT 1
         `);
         
-        if (missions.length === 0) {
+        if (missionsResult.rows.length === 0) {
             return res.json([]);
         }
         
-        const todayMissionId = missions[0].id;
+        const todayMissionId = missionsResult.rows[0].id;
         
         // Récupérer toutes les images de cette mission
-        const [rows] = await pool.execute(`
+        const result = await pool.query(`
             SELECT p.*, u.username, u.first_name, u.last_name
             FROM pictures p 
-            JOIN user u ON p.user_id = u.id 
-            WHERE p.mission_id = ? AND p.is_public = TRUE
+            JOIN users u ON p.user_id = u.id 
+            WHERE p.mission_id = $1 AND p.is_public = TRUE
             ORDER BY p.upload_date DESC
         `, [todayMissionId]);
 
-        res.json(rows);
+        res.json(result.rows);
     } catch (error) {
         console.error('Erreur lors de la récupération des images du jour:', error);
         res.status(500).json({ error: 'Erreur serveur' });
@@ -448,8 +452,8 @@ app.use('*', (req, res) => {
 
 // Fonction pour démarrer le système de reset quotidien
 const startDailyResetScheduler = () => {
-    // Reset au démarrage du serveur
-    resetDailyMissions();
+    // Reset au démarrage du serveur (désactivé temporairement pour éviter les erreurs d'auth)
+    // resetDailyMissions();
     
     // Programmer le reset quotidien à minuit
     const scheduleNextReset = () => {
@@ -475,7 +479,7 @@ const startDailyResetScheduler = () => {
 app.listen(PORT, () => {
     console.log(`🚀 Serveur CrazyReal démarré sur le port ${PORT}`);
     console.log(`📱 API disponible sur http://localhost:${PORT}`);
-    console.log(`📊 Base de données: ${dbConfig.database}@${dbConfig.host}`);
+    console.log(`📊 Base de données PostgreSQL: ${process.env.DB_NAME || 'crazyreal'}@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432}`);
     
     // Démarrer le système de reset quotidien
     startDailyResetScheduler();
