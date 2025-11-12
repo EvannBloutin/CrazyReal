@@ -15,24 +15,28 @@ Ce projet est configuré pour être déployé sur Railway avec Docker.
 
 ### 3. Variables d'environnement à configurer sur Railway
 
-#### Base de données
-Railway fournira automatiquement `DATABASE_URL` quand vous ajoutez PostgreSQL.
+#### Étapes de configuration :
 
-#### Variables obligatoires à ajouter :
+1. **Ajoutez un service PostgreSQL dans Railway**
+   - Cliquez sur "New" → "Database" → "PostgreSQL"
+   - Railway générera automatiquement `DATABASE_URL`
+
+2. **Variables obligatoires à ajouter manuellement :**
 ```env
 NODE_ENV=production
-JWT_SECRET=votre_clé_secrète_jwt_très_sécurisée_ici
-PORT=3000
+JWT_SECRET=votre_clé_secrète_jwt_très_sécurisée_ici_minimum_32_caractères
 ```
 
-#### Variables optionnelles :
+3. **Variables automatiques (fournies par Railway) :**
 ```env
-DB_HOST=localhost
-DB_USER=votre_utilisateur
-DB_PASSWORD=votre_mot_de_passe
-DB_NAME=crazyreal
-DB_PORT=5432
+DATABASE_URL=postgres://user:password@host:port/database
+PORT=auto_assigné_par_railway
 ```
+
+#### ⚠️ Problèmes courants :
+- **ECONNREFUSED** : `DATABASE_URL` manquante → Ajoutez PostgreSQL service
+- **JWT errors** : `JWT_SECRET` manquant → Ajoutez cette variable
+- **Port binding** : Railway assigne automatiquement le PORT
 
 ### 4. Structure du déploiement
 - **Frontend** : Build avec Vite et servi comme fichiers statiques
