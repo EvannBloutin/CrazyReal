@@ -1,7 +1,7 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
@@ -445,10 +445,20 @@ app.post('/api/admin/reset-missions', async (req, res) => {
     }
 });
 
-// Route 404
-app.use('*', (req, res) => {
-    res.status(404).json({ error: 'Route non trouvée' });
-});
+// Servir les fichiers statiques du frontend en production
+if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.join(__dirname, 'public')));
+    
+    // Route catch-all pour servir l'app React
+    app.get('*', (req, res) => {
+        res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    });
+} else {
+    // Route 404 en développement
+    app.use('*', (req, res) => {
+        res.status(404).json({ error: 'Route non trouvée' });
+    });
+}
 
 // Fonction pour démarrer le système de reset quotidien
 const startDailyResetScheduler = () => {
