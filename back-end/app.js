@@ -18,17 +18,18 @@ app.use(express.urlencoded({ extended: true }));
 
 // Configuration de la base de données PostgreSQL
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || undefined,
-    host: process.env.DATABASE_URL ? undefined : (process.env.DB_HOST || 'localhost'),
-    user: process.env.DATABASE_URL ? undefined : (process.env.DB_USER || 'evann'),
-    password: process.env.DATABASE_URL ? undefined : (process.env.DB_PASSWORD || null),
-    database: process.env.DATABASE_URL ? undefined : (process.env.DB_NAME || 'crazyreal'),
-    port: process.env.DATABASE_URL ? undefined : (process.env.DB_PORT || 5432),
+    connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
     max: 10,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    connectionTimeoutMillis: 10000,
 });
+
+// Log de débogage pour Railway
+if (process.env.NODE_ENV === 'production') {
+    console.log('🔗 DATABASE_URL présente:', !!process.env.DATABASE_URL);
+    console.log('🔐 JWT_SECRET présent:', !!process.env.JWT_SECRET);
+}
 
 // Configuration de multer pour l'upload de fichiers
 const storage = multer.diskStorage({
