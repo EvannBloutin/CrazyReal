@@ -2,34 +2,41 @@
 
 Backend API pour l'application CrazyReal avec Express.js, MySQL et JWT.
 
-## Configuration de la base de données
+## Configuration de la base de données PostgreSQL
 
 Le fichier `database.sql` contient la structure complète de la base de données avec :
-- Tables : `user`, `mission`, `pictures`, `user_missions`
+- Tables : `users`, `missions`, `pictures`, `user_missions`
+- Types ENUM PostgreSQL
 - Index de performance
 - Données d'exemple (5 missions de test)
 
 ### Installation complète (première fois)
 
 ```bash
-# Créer la base de données et toutes les tables
-mysql -u evann -p < database.sql
+# Créer la base de données
+createdb crazyreal
+
+# Importer la structure et les données
+psql -d crazyreal -f database.sql
 ```
 
-### Si vous avez déjà une base existante
+### Alternative avec psql
 
 ```bash
-# Option 1: Supprimer et recréer (ATTENTION: perte de données)
-mysql -u evann -p -e "DROP DATABASE IF EXISTS crazyreal;"
-mysql -u evann -p < database.sql
+# Se connecter à PostgreSQL
+psql -U postgres
 
-# Option 2: Mettre à jour manuellement
-mysql -u evann -p crazyreal -e "
-ALTER TABLE mission 
-ADD COLUMN IF NOT EXISTS is_completed BOOLEAN DEFAULT FALSE,
-ADD COLUMN IF NOT EXISTS completed_date DATE NULL;
-"
+# Créer la base
+CREATE DATABASE crazyreal;
+\c crazyreal
+
+# Importer le fichier
+\i database.sql
 ```
+
+### Pour Render (Production)
+
+Render va automatiquement créer une base PostgreSQL et fournir l'URL de connexion via `DATABASE_URL`.
 
 ## Démarrage du serveur
 
